@@ -29,6 +29,8 @@ export interface Particle {
   maxEnergy: number; // Cap for energy
   generation: number; // Evolution level (1 = base)
   age: number;
+  status?: 'ALIVE' | 'DYING';
+  deathTick?: number;
 }
 
 export interface EcosystemConfig {

@@ -25,7 +25,7 @@ const vecLimit = (v: Vector2, max: number) => {
 
 export const SimulationCanvas: React.FC<SimulationCanvasProps> = ({ ecosystem, isRunning, onStatsUpdate }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const requestRef = useRef<number>();
+  const requestRef = useRef<number | null>(null);
   const particlesRef = useRef<Particle[]>([]);
   const mouseRef = useRef<Vector2>({ x: -1000, y: -1000 });
   const statsRef = useRef({ lastTime: 0, frames: 0 });
@@ -173,6 +173,9 @@ export const SimulationCanvas: React.FC<SimulationCanvasProps> = ({ ecosystem, i
         
         if (p2.energy <= 0) continue;
 
+        const s2 = speciesMap.get(p2.speciesId);
+        if (!s2) continue;
+
         const dx = p2.x - p1.x;
         const dy = p2.y - p1.y;
         const dist = Math.hypot(dx, dy);
@@ -182,12 +185,30 @@ export const SimulationCanvas: React.FC<SimulationCanvasProps> = ({ ecosystem, i
             const overlap = (p1.radius + p2.radius) - dist;
             const sufficientOverlap = overlap > (p2.radius * SIMULATION_CONFIG.EATING_THRESHOLD);
             
+            const isAggressive = s1.behavior === 'AGGRESSIVE' || s1.aggression > 0.6;
+            const p2Aggressive = s2.behavior === 'AGGRESSIVE' || s2.aggression > 0.6;
+
+            // --- INFIGHTING LOGIC (PRIORITY 1) ---
+            // If BOTH are aggressive, they die instantly on contact.
+            // This effectively prevents aggressive species from clumping or merging.
+            if (isAggressive && p2Aggressive && overlap > 0) {
+                 p1.energy = -100;
+                 p2.energy = -100;
+                 p1.status = 'DYING';
+                 p2.status = 'DYING';
+                 p1.deathTick = 0;
+                 p2.deathTick = 0;
+                 // Stop processing p1 immediately
+                 break;
+            }
+
             // --- MERGING / MATING LOGIC ---
             if (
                 p1.speciesId === p2.speciesId && 
                 p1.energy > SIMULATION_CONFIG.MATING_THRESHOLD && 
                 p2.energy > SIMULATION_CONFIG.MATING_THRESHOLD &&
-                overlap > 0 // Just need to touch
+                overlap > 0 &&
+                !isAggressive // AGGRESSIVE species cannot mate
             ) {
                 // Chance to merge to prevent instant mass merging
                 if (Math.random() < 0.1) {
@@ -214,7 +235,6 @@ export const SimulationCanvas: React.FC<SimulationCanvasProps> = ({ ecosystem, i
 
             // --- EATING LOGIC ---
             const p1Bigger = p1.radius > p2.radius * 1.1; 
-            const isAggressive = s1.behavior === 'AGGRESSIVE' || s1.aggression > 0.6;
 
             if (p1Bigger && isAggressive && p1.speciesId !== p2.speciesId && sufficientOverlap) {
                 p1.energy = Math.min(p1.energy + SIMULATION_CONFIG.EATING_ENERGY_GAIN, p1.maxEnergy);
@@ -226,9 +246,6 @@ export const SimulationCanvas: React.FC<SimulationCanvasProps> = ({ ecosystem, i
 
         // 2b. Sensing
         if (dist < s1.sensorRadius && dist > 0) {
-            const s2 = speciesMap.get(p2.speciesId);
-            if (!s2) continue;
-
             const toNeighbor = { x: dx, y: dy };
             const fromNeighbor = { x: -dx, y: -dy };
             
@@ -306,7 +323,6 @@ export const SimulationCanvas: React.FC<SimulationCanvasProps> = ({ ecosystem, i
       p1.energy -= SIMULATION_CONFIG.ENERGY_DECAY * efficiency; 
       
       // Reproduction (Cloning - Standard)
-      // Evolved particles don't clone easily, they prefer merging, but can clone if energy super high
       const reproductionCost = SIMULATION_CONFIG.REPRODUCTION_COST * genMult;
       if (p1.energy > reproductionCost && Math.random() < 0.005) {
          p1.energy -= 40 * genMult;
